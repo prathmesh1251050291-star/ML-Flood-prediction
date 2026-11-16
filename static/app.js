@@ -1,10 +1,9 @@
-// Nepal Hydro Predictor - Interactive Frontend Engine
+// Nepal Hydrology & Flood Risk Prediction System - Frontend
 
 let stationsData = {};
 let rainChartInstance = null;
 let moistureChartInstance = null;
 
-// Fallback station metadata in case API is delayed
 const DEFAULT_STATIONS = {
     "Rasuwagadhi": { basin: "Narayani", river: "Bhote Koshi", dhm_station: "446.22", elevation_m: 1749, latitude: 28.271297, longitude: 85.377649, avg_soil_moisture: 0.359 },
     "Bahrabise": { basin: "Koshi", river: "Bhote Koshi", dhm_station: "610.0", elevation_m: 1870, latitude: 27.786773, longitude: 85.899324, avg_soil_moisture: 0.302 },
@@ -18,17 +17,15 @@ const DEFAULT_STATIONS = {
     "Kusum": { basin: "Rapti", river: "West Rapti", dhm_station: "375.0", elevation_m: 230, latitude: 28.0075, longitude: 82.093889, avg_soil_moisture: 0.276 }
 };
 
-// Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
     initCharts();
-    setupInputSync();
+    setupEventListeners();
     await loadStations();
     await loadMetrics();
-    callPredictAPI();
+    calculatePrediction();
 });
 
-// Sync slider ranges with value badges
-function setupInputSync() {
+function setupEventListeners() {
     const inputs = [
         { id: 'todayRain', valId: 'todayRainVal' },
         { id: 'yesterdayRain', valId: 'yesterdayRainVal' },
@@ -50,7 +47,7 @@ function setupInputSync() {
     const locationSelect = document.getElementById('locationSelect');
     if (locationSelect) {
         locationSelect.addEventListener('change', () => {
-            updateStationCard();
+            updateStationInfo();
             debouncePredict();
         });
     }
@@ -64,7 +61,7 @@ function setupInputSync() {
 
     const predictBtn = document.getElementById('predictBtn');
     if (predictBtn) {
-        predictBtn.addEventListener('click', callPredictAPI);
+        predictBtn.addEventListener('click', calculatePrediction);
     }
 
     const useHistoricalBtn = document.getElementById('useHistoricalBtn');
@@ -77,13 +74,12 @@ function setupInputSync() {
                 const valEl = document.getElementById('soilMoistureVal');
                 soilEl.value = data.avg_soil_moisture;
                 valEl.textContent = data.avg_soil_moisture;
-                callPredictAPI();
+                calculatePrediction();
             }
         });
     }
 }
 
-// Fetch Stations from API
 async function loadStations() {
     try {
         const res = await fetch('/api/locations');
@@ -94,14 +90,9 @@ async function loadStations() {
             stationsData = DEFAULT_STATIONS;
         }
     } catch (e) {
-        console.warn('Using default station coordinates:', e);
         stationsData = DEFAULT_STATIONS;
     }
 
-    populateLocationDropdown();
-}
-
-function populateLocationDropdown() {
     const select = document.getElementById('locationSelect');
     if (!select) return;
     select.innerHTML = '';
@@ -109,16 +100,15 @@ function populateLocationDropdown() {
     Object.keys(stationsData).forEach((locName, index) => {
         const opt = document.createElement('option');
         opt.value = locName;
-        opt.textContent = `${locName} Station (${stationsData[locName].basin} Basin)`;
+        opt.textContent = `${locName} (${stationsData[locName].basin} Basin)`;
         if (index === 0) opt.selected = true;
         select.appendChild(opt);
     });
 
-    updateStationCard();
+    updateStationInfo();
 }
 
-// Update station metadata display
-function updateStationCard() {
+function updateStationInfo() {
     const loc = document.getElementById('locationSelect').value;
     const data = stationsData[loc];
     if (!data) return;
@@ -129,10 +119,8 @@ function updateStationCard() {
     document.getElementById('elevation').textContent = `${data.elevation_m} m`;
     document.getElementById('coordinates').textContent = `${Number(data.latitude).toFixed(4)}°N, ${Number(data.longitude).toFixed(4)}°E`;
     document.getElementById('avgSoil').textContent = `${Number(data.avg_soil_moisture).toFixed(3)} m³/m³`;
-    document.getElementById('resultStationTag').textContent = `${loc} Hydrology Station`;
 }
 
-// Load Model Performance Metrics
 async function loadMetrics() {
     try {
         const res = await fetch('/api/metrics');
@@ -142,67 +130,19 @@ async function loadMetrics() {
             if (document.getElementById('metaRmse')) document.getElementById('metaRmse').textContent = m.rmse;
             if (document.getElementById('metaAuc')) document.getElementById('metaAuc').textContent = m.auc;
             if (document.getElementById('metaAcc')) document.getElementById('metaAcc').textContent = `${(m.accuracy * 100).toFixed(1)}%`;
-            if (document.getElementById('headerDatasetRecords') && m.dataset_records) {
-                document.getElementById('headerDatasetRecords').textContent = `${m.dataset_records.toLocaleString()} Records`;
-            }
         }
     } catch (e) {
-        console.warn('Could not fetch metrics:', e);
+        console.warn('Could not load metrics:', e);
     }
 }
 
-// Preset Handler
-function applyPreset(presetType) {
-    const seasonEl = document.getElementById('seasonSelect');
-    const todayEl = document.getElementById('todayRain');
-    const yestEl = document.getElementById('yesterdayRain');
-    const priorEl = document.getElementById('prior3Rain');
-    const soilEl = document.getElementById('soilMoisture');
-
-    if (presetType === 'monsoon_heavy') {
-        seasonEl.value = 'Monsoon';
-        todayEl.value = 85;
-        yestEl.value = 45;
-        priorEl.value = 60;
-        soilEl.value = 0.38;
-    } else if (presetType === 'moderate_rain') {
-        seasonEl.value = 'Monsoon';
-        todayEl.value = 25;
-        yestEl.value = 15;
-        priorEl.value = 10;
-        soilEl.value = 0.30;
-    } else if (presetType === 'dry_winter') {
-        seasonEl.value = 'Winter';
-        todayEl.value = 0;
-        yestEl.value = 0;
-        priorEl.value = 0;
-        soilEl.value = 0.20;
-    } else if (presetType === 'saturation_flood') {
-        seasonEl.value = 'Monsoon';
-        todayEl.value = 125;
-        yestEl.value = 75;
-        priorEl.value = 90;
-        soilEl.value = 0.44;
-    }
-
-    // Update value badges
-    document.getElementById('todayRainVal').textContent = todayEl.value;
-    document.getElementById('yesterdayRainVal').textContent = yestEl.value;
-    document.getElementById('prior3RainVal').textContent = priorEl.value;
-    document.getElementById('soilMoistureVal').textContent = soilEl.value;
-
-    callPredictAPI();
-}
-
-// Debounce timer for smooth slider dragging
 let debounceTimer = null;
 function debouncePredict() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(callPredictAPI, 150);
+    debounceTimer = setTimeout(calculatePrediction, 120);
 }
 
-// Call FastAPI Predict Endpoint
-async function callPredictAPI() {
+async function calculatePrediction() {
     const loc = document.getElementById('locationSelect').value;
     const season = document.getElementById('seasonSelect').value;
     const todayRain = parseFloat(document.getElementById('todayRain').value) || 0;
@@ -228,105 +168,54 @@ async function callPredictAPI() {
             body: JSON.stringify(payload)
         });
 
-        if (!response.ok) {
-            const err = await response.json();
-            console.error('API Error:', err);
-            return;
-        }
+        if (!response.ok) return;
 
         const data = await response.json();
-        renderResults(data, payload);
+        updateUI(data, payload);
     } catch (e) {
-        console.error('Network error during prediction:', e);
+        console.error('Prediction request error:', e);
     }
 }
 
-// Render Results & Update Visuals
-function renderResults(data, payload) {
-    // 1. Predicted Soil Moisture
-    const predVal = Number(data.predicted_soil_moisture).toFixed(3);
-    document.getElementById('predMoistureVal').textContent = predVal;
-
-    // Saturation Tag
+function updateUI(data, payload) {
+    // 1. Soil moisture
+    document.getElementById('predMoistureVal').textContent = Number(data.predicted_soil_moisture).toFixed(3);
     const satTag = document.getElementById('saturationStatusTag');
     if (data.is_saturated) {
-        satTag.textContent = 'SATURATED (> 0.38)';
-        satTag.className = 'metric-tag saturated';
+        satTag.textContent = 'Saturated (>0.38)';
+        satTag.className = 'result-status saturated';
     } else {
-        satTag.textContent = 'NORMAL / STABLE';
-        satTag.className = 'metric-tag normal';
+        satTag.textContent = 'Normal (<0.38)';
+        satTag.className = 'result-status normal';
     }
 
-    // 2. Flood Probability
+    // 2. Flood probability
     const prob = Number(data.flood_probability).toFixed(1);
-    document.getElementById('floodProbVal').textContent = prob;
+    document.getElementById('floodProbVal').textContent = `${prob}%`;
     document.getElementById('probBarFill').style.width = `${Math.min(100, Math.max(0, prob))}%`;
 
-    // 3. Hydrological State
-    const hydroCallout = document.getElementById('hydroStateCallout');
-    if (data.flood_risk === 'Critical' || data.flood_risk === 'High') {
-        hydroCallout.textContent = 'Severe Flood Threat';
-        hydroCallout.style.color = '#dc2626';
-    } else if (data.flood_risk === 'Moderate') {
-        hydroCallout.textContent = 'Moderate Runoff';
-        hydroCallout.style.color = '#d97706';
-    } else {
-        hydroCallout.textContent = 'Normal Inflow';
-        hydroCallout.style.color = '#15803d';
-    }
-
-    // 4. Risk Badge
+    // 3. Flood risk pill
     const riskBadge = document.getElementById('riskLevelBadge');
-    const riskText = document.getElementById('floodRiskText');
-    const risk = data.flood_risk.toUpperCase();
-    riskText.textContent = `${risk} RISK`;
-
-    riskBadge.className = 'risk-badge';
+    riskBadge.textContent = data.flood_risk;
+    riskBadge.className = 'risk-pill';
     if (data.flood_risk === 'Low') riskBadge.classList.add('risk-low');
     else if (data.flood_risk === 'Moderate') riskBadge.classList.add('risk-moderate');
     else if (data.flood_risk === 'High') riskBadge.classList.add('risk-high');
     else riskBadge.classList.add('risk-critical');
 
-    // 5. Saturation Gauge Fill (0 to 0.55 scale mapped to percentage)
-    const ratioToCutoff = Math.round((data.predicted_soil_moisture / 0.38) * 100);
-    document.getElementById('saturationRatioText').textContent = `${ratioToCutoff}% of Saturated Capacity`;
+    // 4. Saturation meter
     const gaugePercent = Math.min(100, Math.max(5, (data.predicted_soil_moisture / 0.55) * 100));
     document.getElementById('gaugeFill').style.width = `${gaugePercent}%`;
+    const ratioToCutoff = Math.round((data.predicted_soil_moisture / 0.38) * 100);
+    document.getElementById('saturationRatioText').textContent = `${ratioToCutoff}% of saturation threshold`;
 
-    // 6. Advisory Banner
-    const advBox = document.getElementById('advisoryBox');
-    const advIcon = document.getElementById('advisoryIcon');
-    const advTitle = document.getElementById('advisoryTitle');
-    const advText = document.getElementById('advisoryText');
+    // 5. Advisory Text
+    document.getElementById('advisoryText').textContent = data.advisory;
 
-    advText.textContent = data.advisory;
-    if (data.flood_risk === 'Critical') {
-        advIcon.textContent = '🚨';
-        advTitle.textContent = 'CRITICAL FLASH FLOOD WARNING';
-        advBox.style.background = '#fef2f2';
-        advBox.style.borderColor = '#fecaca';
-    } else if (data.flood_risk === 'High') {
-        advIcon.textContent = '⚠️';
-        advTitle.textContent = 'HIGH WATER & FLOOD WATCH';
-        advBox.style.background = '#fff7ed';
-        advBox.style.borderColor = '#fed7aa';
-    } else if (data.flood_risk === 'Moderate') {
-        advIcon.textContent = '👁️';
-        advTitle.textContent = 'CATCHMENT MONITORING NOTICE';
-        advBox.style.background = '#fffbeb';
-        advBox.style.borderColor = '#fde68a';
-    } else {
-        advIcon.textContent = '✅';
-        advTitle.textContent = 'ALL CLEAR - NORMAL FLOW';
-        advBox.style.background = '#ecfdf5';
-        advBox.style.borderColor = '#a7f3d0';
-    }
-
-    // 7. Update Charts
+    // 6. Charts update
     updateCharts(payload, data);
 }
 
-// Chart.js Setup and Update
 function initCharts() {
     const rainCtx = document.getElementById('rainChart');
     if (rainCtx) {
@@ -335,10 +224,11 @@ function initCharts() {
             data: {
                 labels: ['3-Day Prior', 'Yesterday', 'Today'],
                 datasets: [{
-                    label: 'Precipitation (mm)',
+                    label: 'Rainfall (mm)',
                     data: [40, 20, 65],
-                    backgroundColor: ['#93c5fd', '#60a5fa', '#0284c7'],
-                    borderRadius: 6
+                    backgroundColor: '#60a5fa',
+                    borderColor: '#005a9c',
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -346,7 +236,7 @@ function initCharts() {
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
                 scales: {
-                    y: { beginAtZero: true, max: 250, grid: { color: '#f1f5f9' } },
+                    y: { beginAtZero: true, max: 250, grid: { color: '#eef2f6' } },
                     x: { grid: { display: false } }
                 }
             }
@@ -358,12 +248,12 @@ function initCharts() {
         moistureChartInstance = new Chart(moistureCtx, {
             type: 'bar',
             data: {
-                labels: ['Hist. Avg', 'Yesterday', 'Predicted Today', 'Saturation Cutoff'],
+                labels: ['Hist. Avg', 'Prior Day', 'Predicted', 'Cutoff (0.38)'],
                 datasets: [{
                     label: 'Soil Moisture (m³/m³)',
                     data: [0.35, 0.35, 0.36, 0.38],
-                    backgroundColor: ['#cbd5e1', '#38bdf8', '#0284c7', '#ef4444'],
-                    borderRadius: 6
+                    backgroundColor: ['#cbd5e1', '#93c5fd', '#005a9c', '#f87171'],
+                    borderWidth: 1
                 }]
             },
             options: {
@@ -371,7 +261,7 @@ function initCharts() {
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
                 scales: {
-                    y: { beginAtZero: true, min: 0, max: 0.55, grid: { color: '#f1f5f9' } },
+                    y: { beginAtZero: true, min: 0, max: 0.55, grid: { color: '#eef2f6' } },
                     x: { grid: { display: false } }
                 }
             }
@@ -397,14 +287,6 @@ function updateCharts(payload, result) {
             payload.yesterday_soil_moisture,
             result.predicted_soil_moisture,
             0.38
-        ];
-        // Dynamic coloring of predicted bar if saturated
-        const predColor = result.is_saturated ? '#dc2626' : '#0284c7';
-        moistureChartInstance.data.datasets[0].backgroundColor = [
-            '#94a3b8',
-            '#38bdf8',
-            predColor,
-            'rgba(239, 68, 68, 0.35)'
         ];
         moistureChartInstance.update();
     }
