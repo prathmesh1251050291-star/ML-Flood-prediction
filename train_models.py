@@ -1,20 +1,22 @@
 import pandas as pd
 import numpy as np
 import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import (
+    r2_score,
+    mean_squared_error,
+    mean_absolute_error,
+    roc_auc_score,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score
+)
 
-# Load data
-df = pd.read_csv('CORRECTED_2023_2026_NEPAL_FLOOD_WEATHER_KAGGLE-selected-columns.csv', parse_dates=['date'])
-
-# Sort by location and date
-df = df.sort_values(['location', 'date']).reset_index(drop=True)
-
-# Feature engineering
-# Lag features
-df['Precip_Lag1'] = df.groupby('location')['precipitation_mm'].shift(1)
-df['Precip_Lag3'] = df.groupby('location')['precipitation_mm'].shift(3)
-df['SM_Lag1'] = df.groupby('location')['soil_moisture_0_100cm_m3m3'].shift(1)
-
-# Season mapping
 def get_season(month):
     if month in [3, 4, 5]:
         return 'Pre-Monsoon'
@@ -25,91 +27,127 @@ def get_season(month):
     else:
         return 'Winter'
 
-df['Season'] = df['date'].dt.month.map(get_season)
+def main():
+    print("Loading Nepal Hydrology & Weather Dataset...")
+    csv_file = 'CORRECTED_2023_2026_NEPAL_FLOOD_WEATHER_KAGGLE-selected-columns.csv'
+    df = pd.read_csv(csv_file, parse_dates=['date'])
+    df = df.sort_values(['location', 'date']).reset_index(drop=True)
 
-# Elevation Tier
-def get_elev_tier(elev):
-    if elev < 500:
-        return 'Low'
-    elif elev < 1500:
-        return 'Medium'
-    else:
-        return 'High'
+    # Location metadata lookup table from actual dataset
+    loc_summary = df.groupby('location').agg({
+        'basin': 'first',
+        'river': 'first',
+        'dhm_station': 'first',
+        'latitude': 'first',
+        'longitude': 'first',
+        'elevation_m': 'first',
+        'soil_moisture_0_100cm_m3m3': 'mean'
+    })
 
-df['Elevation_Tier'] = df['elevation_m'].apply(get_elev_tier)
+    locations_dict = {}
+    for loc, row in loc_summary.iterrows():
+        locations_dict[loc] = {
+            'basin': str(row['basin']),
+            'river': str(row['river']),
+            'dhm_station': str(row['dhm_station']),
+            'latitude': float(row['latitude']),
+            'longitude': float(row['longitude']),
+            'elevation_m': float(row['elevation_m']),
+            'avg_soil_moisture': round(float(row['soil_moisture_0_100cm_m3m3']), 4)
+        }
 
-# Flood flag: extreme rainfall (>50mm) OR saturated soil (>0.38)
-df['flood_flag'] = ((df['precipitation_mm'] > 50) | (df['soil_moisture_0_100cm_m3m3'] > 0.38)).astype(int)
+    # Feature engineering
+    df['Precip_Lag1'] = df.groupby('location')['precipitation_mm'].shift(1)
+    df['Precip_Lag3'] = df.groupby('location')['precipitation_mm'].shift(3)
+    df['SM_Lag1'] = df.groupby('location')['soil_moisture_0_100cm_m3m3'].shift(1)
+    df['Season'] = df['date'].dt.month.map(get_season)
 
-# Drop rows with NaN in lag features
-df = df.dropna(subset=['Precip_Lag1', 'Precip_Lag3', 'SM_Lag1']).reset_index(drop=True)
+    # Flood flag (extreme rainfall > 50mm OR saturated soil > 0.38)
+    df['flood_flag'] = ((df['precipitation_mm'] > 50) | (df['soil_moisture_0_100cm_m3m3'] > 0.38)).astype(int)
 
-# Define features and targets
-feature_cols = ['location', 'basin', 'river', 'latitude', 'longitude', 'elevation_m', 'Season', 'precipitation_mm', 'Precip_Lag1', 'Precip_Lag3', 'SM_Lag1']
-X = df[feature_cols]
+    # Drop NaNs from shift
+    df = df.dropna(subset=['Precip_Lag1', 'Precip_Lag3', 'SM_Lag1']).reset_index(drop=True)
 
-y_regression = df['soil_moisture_0_100cm_m3m3']
-y_classification = df['flood_flag']
+    categorical_cols = ['location', 'Season']
+    numeric_cols = [
+        'elevation_m',
+        'latitude',
+        'longitude',
+        'precipitation_mm',
+        'Precip_Lag1',
+        'Precip_Lag3',
+        'SM_Lag1'
+    ]
+    feature_cols = categorical_cols + numeric_cols
 
-# Split data
-from sklearn.model_selection import train_test_split
+    X = df[feature_cols]
+    y_reg = df['soil_moisture_0_100cm_m3m3']
+    y_clf = df['flood_flag']
 
-X_train, X_test, y_reg_train, y_reg_test, y_clf_train, y_clf_test = train_test_split(
-    X, y_regression, y_classification, test_size=0.2, random_state=42
-)
+    # Train-test split
+    X_train, X_test, y_reg_train, y_reg_test, y_clf_train, y_clf_test = train_test_split(
+        X, y_reg, y_clf, test_size=0.2, random_state=42
+    )
 
-# Train models
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.linear_model import LinearRegression
-import statsmodels.api as sm
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols),
+            ('num', 'passthrough', numeric_cols)
+        ]
+    )
 
-# Random Forest Regressor
-rf_reg = RandomForestRegressor(n_estimators=200, random_state=42)
-rf_reg.fit(X_train, y_reg_train)
+    print("Training Random Forest Regressor (Soil Moisture)...")
+    reg_pipe = Pipeline([
+        ('prep', preprocessor),
+        ('model', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+    ])
+    reg_pipe.fit(X_train, y_reg_train)
 
-# OLS Regression (statsmodels)
-X_train_sm = sm.add_constant(X_train)  # adds intercept term
-ols_reg = sm.OLS(y_reg_train, X_train_sm).fit()
+    y_reg_pred = reg_pipe.predict(X_test)
+    r2 = float(r2_score(y_reg_test, y_reg_pred))
+    rmse = float(np.sqrt(mean_squared_error(y_reg_test, y_reg_pred)))
+    mae = float(mean_absolute_error(y_reg_test, y_reg_pred))
 
-# Random Forest Classifier
-rf_clf = RandomForestClassifier(n_estimators=200, random_state=42)
-rf_clf.fit(X_train, y_clf_train)
+    print(f"Regression -> R2: {r2:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}")
 
-# Evaluation
-from sklearn.metrics import r2_score, mean_squared_error, roc_auc_score, accuracy_score
+    print("Training Random Forest Classifier (Flood Risk)...")
+    clf_pipe = Pipeline([
+        ('prep', preprocessor),
+        ('model', RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1))
+    ])
+    clf_pipe.fit(X_train, y_clf_train)
 
-# Regression metrics
-y_reg_pred = rf_reg.predict(X_test)
-y_reg_pred_ols = ols_reg.predict(sm.add_constant(X_test))
+    y_clf_pred = clf_pipe.predict(X_test)
+    y_clf_proba = clf_pipe.predict_proba(X_test)[:, 1]
 
-r2 = r2_score(y_reg_test, y_reg_pred)
-rmse = np.sqrt(mean_squared_error(y_reg_test, y_reg_pred))
+    auc = float(roc_auc_score(y_clf_test, y_clf_proba))
+    acc = float(accuracy_score(y_clf_test, y_clf_pred))
+    prec = float(precision_score(y_clf_test, y_clf_pred))
+    rec = float(recall_score(y_clf_test, y_clf_pred))
+    f1 = float(f1_score(y_clf_test, y_clf_pred))
 
-# Classification metrics
-y_clf_pred = rf_clf.predict(X_test)
-y_clf_pred_proba = rf_clf.predict_proba(X_test)[:, 1]
-auc = roc_auc_score(y_clf_test, y_clf_pred_proba)
-acc = accuracy_score(y_clf_test, y_clf_pred)
+    print(f"Classification -> AUC: {auc:.4f}, Accuracy: {acc:.4f}, Precision: {prec:.4f}, Recall: {rec:.4f}, F1: {f1:.4f}")
 
-# Save models
-model_dict = {
-    'rf_regressor': rf_reg,
-    'ols_regressor': ols_reg,
-    'rf_classifier': rf_clf,
-    'metadata': {
-        'r2': r2,
-        'rmse': rmse,
-        'auc': auc,
-        'accuracy': acc,
-        'feature_cols': feature_cols,
-        'location_lookup': {loc: {'basin': row['basin'], 'river': row['river'], 'latitude': row['latitude'], 
-                                'longitude': row['longitude'], 'elevation_m': row['elevation_m']} 
-                               for loc, row in df[['location', 'basin', 'river', 'latitude', 'longitude', 'elevation_m']].drop_duplicates().iterrows()
+    bundle = {
+        'regressor': reg_pipe,
+        'classifier': clf_pipe,
+        'locations': locations_dict,
+        'metrics': {
+            'r2': round(r2, 4),
+            'rmse': round(rmse, 4),
+            'mae': round(mae, 4),
+            'auc': round(auc, 4),
+            'accuracy': round(acc, 4),
+            'precision': round(prec, 4),
+            'recall': round(rec, 4),
+            'f1': round(f1, 4),
+            'dataset_records': len(df)
+        },
+        'feature_cols': feature_cols
     }
-}
 
-joblib.dump(model_dict, 'models/nepal_hydro_models.joblib')
+    joblib.dump(bundle, 'models/nepal_hydro_models.joblib')
+    print("Successfully saved models bundle to models/nepal_hydro_models.joblib")
 
-print("Models trained and saved.")
-print(f"Regression R2: {r2:.3f}, RMSE: {rmse:.3f}")
-print(f"Classification AUC: {auc:.3f}, Accuracy: {acc:.3f}")
+if __name__ == '__main__':
+    main()

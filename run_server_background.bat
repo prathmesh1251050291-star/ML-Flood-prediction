@@ -1,9 +1,9 @@
 @echo off
-cd /d C:\Users\Admin\Desktop\Pas project - web
+cd /d "C:\Users\Admin\Desktop\Pas project - web"
 :loop
-& "C:\Users\Admin\AppData\Local\Programs\Python\Python312\python.exe" app.py
+python app.py
 if %errorlevel% neq 0 (
-    echo Server crashed, restarting in 5 seconds...
+    echo Server stopped or crashed, restarting in 5 seconds...
     timeout /t 5 >nul
     goto loop
 )

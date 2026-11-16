@@ -1,34 +1,39 @@
+import os
 import joblib
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from typing import Dict, Any
 
-# Load models
-model_path = 'models/nepal_hydro_models.joblib'
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'nepal_hydro_models.joblib')
+
+# Load model bundle
 try:
-    model = joblib.load(model_path)
+    model_bundle = joblib.load(MODEL_PATH)
+    regressor = model_bundle['regressor']
+    classifier = model_bundle['classifier']
+    locations_dict = model_bundle['locations']
+    model_metrics = model_bundle['metrics']
 except Exception as e:
-    raise RuntimeError(f"Failed to load model: {e}")
+    raise RuntimeError(f"Failed to load models from {MODEL_PATH}: {e}")
 
-# Location lookup dict (same as before)
-location_lookup = {
-    "Rasuwagadhi": {"basin": "Narayani", "river": "Bhote Koshi", "latitude": 28.271297, "longitude": 85.377649, "elevation_m": 1749},
-    "Bahrabise": {"basin": "Trisuli", "river": "Trisuli", "latitude": 27.345678, "longitude": 85.234567, "elevation_m": 1020},
-    "Khokana": {"basin": "Bagmati", "river": "Bagmati", "latitude": 27.567890, "longitude": 85.345678, "elevation_m": 1200},
-    "Devghat": {"basin": "Narayani", "river": "Gandaki", "latitude": 27.654321, "longitude": 85.432109, "elevation_m": 850},
-    "Chatara": {"basin": "Karnali", "river": "Chatara", "latitude": 28.001234, "longitude": 85.654321, "elevation_m": 1500},
-    "Belsot": {"basin": "Sagarmatha", "river": "Belsot", "latitude": 27.987654, "longitude": 85.765432, "elevation_m": 1800},
-    "Kusum": {"basin": "Dadhi", "river": "Kusum", "latitude": 27.432109, "longitude": 85.876543, "elevation_m": 1600},
-    "Bhada Bridge": {"basin": "Narayani", "river": "Bhada", "latitude": 27.876543, "longitude": 85.987654, "elevation_m": 1400},
-    "Chisapani": {"basin": "Kathmandu", "river": "Chisapani", "latitude": 27.654321, "longitude": 85.345678, "elevation_m": 1250},
-    "Chameliya/Nayalbadi": {"basin": "Trisuli", "river": "Trisuli", "latitude": 27.543210, "longitude": 85.432109, "elevation_m": 1350}
-}
+app = FastAPI(
+    title="Nepal Hydrological & Flood Risk Predictor",
+    description="Real-time ML-powered soil moisture & flood risk forecasting for Nepal river basins",
+    version="2.0.0"
+)
 
-app = FastAPI(title="Nepal Hydro Predictor")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -36,103 +41,140 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     return FileResponse("static/index.html")
 
+@app.get("/api/locations")
+def get_locations():
+    return {
+        "count": len(locations_dict),
+        "locations": locations_dict
+    }
+
+@app.get("/api/metrics")
+def get_metrics():
+    return model_metrics
+
 class PredictRequest(BaseModel):
     location: str
-    season: str
-    today_rainfall_mm: float
-    yesterday_rainfall_mm: float
-    prior3_rainfall_mm: float
-    yesterday_soil_moisture: float
+    season: str = Field(..., description="Pre-Monsoon, Monsoon, Post-Monsoon, or Winter")
+    today_rainfall_mm: float = Field(..., ge=0.0, le=500.0)
+    yesterday_rainfall_mm: float = Field(..., ge=0.0, le=500.0)
+    prior3_rainfall_mm: float = Field(..., ge=0.0, le=500.0)
+    yesterday_soil_moisture: float = Field(..., ge=0.05, le=0.65)
 
 class PredictionResponse(BaseModel):
     location: str
     basin: str
     river: str
+    dhm_station: str
     elevation_m: float
     latitude: float
     longitude: float
     predicted_soil_moisture: float
     saturation_status: str
+    is_saturated: bool
+    flood_probability: float
     flood_risk: str
+    flood_alert_level: str
+    advisory: str
     model_performance: Dict[str, Any]
 
-@app.on_event("startup")
-def load_model():
-    print("Model loaded successfully.")
+@app.get("/api/predict")
+def predict_info():
+    return {
+        "status": "ready",
+        "description": "Send a POST request with weather parameters to get real-time soil moisture and flood risk predictions.",
+        "example_payload": {
+            "location": "Rasuwagadhi",
+            "season": "Monsoon",
+            "today_rainfall_mm": 65.0,
+            "yesterday_rainfall_mm": 20.0,
+            "prior3_rainfall_mm": 40.0,
+            "yesterday_soil_moisture": 0.35
+        }
+    }
 
 @app.post("/api/predict", response_model=PredictionResponse)
 def predict(req: PredictRequest):
     # Validate location
-    if req.location not in location_lookup:
-        raise HTTPException(status_code=404, detail="Location not found")
-    
-    # Get location attributes
-    loc_attrs = location_lookup[req.location]
-    basin = loc_attrs['basin']
-    river = loc_attrs['river']
-    elevation_m = loc_attrs['elevation_m']
-    latitude = loc_attrs['latitude']
-    longitude = loc_attrs['longitude']
-    
-    # Basic validation
-    if not (0 <= req.today_rainfall_mm <= 250):
-        raise HTTPException(status_code=400, detail="Today's rainfall must be between 0 and 250 mm")
-    if not (0 <= req.yesterday_rainfall_mm <= 250):
-        raise HTTPException(status_code=400, detail="Yesterday's rainfall must be between 0 and 250 mm")
-    if not (0 <= req.prior3_rainfall_mm <= 250):
-        raise HTTPException(status_code=400, detail="3-Day prior rainfall must be between 0 and 250 mm")
-    if not (0.10 <= req.yesterday_soil_moisture <= 0.55):
-        raise HTTPException(status_code=400, detail="Soil moisture must be between 0.10 and 0.55")
-    if req.season not in ["Pre-Monsoon", "Monsoon", "Post-Monsoon", "Winter"]:
-        raise HTTPException(status_code=400, detail="Invalid season")
-    
-    # Prepare feature vector (one-hot encoded location + numeric features)
-    # For simplicity, we'll create a DataFrame with the same columns used in training
-    sorted_locations = sorted(location_lookup.keys())
-    row = {loc: int(loc == req.location) for loc in sorted_locations}
-    row['precipitation_mm'] = req.today_rainfall_mm
-    row['soil_moisture_0_100cm_m3m3'] = req.yesterday_soil_moisture
-    X = pd.DataFrame([row], columns=sorted_locations + ['precipitation_mm', 'soil_moisture_0_100cm_m3m3'])
-    
-    # Ensure the feature order matches training
-    # This is a simplified approach; in practice, you'd need to ensure exact column alignment
+    if req.location not in locations_dict:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Location '{req.location}' not found. Valid locations: {', '.join(locations_dict.keys())}"
+        )
+
+    valid_seasons = ["Pre-Monsoon", "Monsoon", "Post-Monsoon", "Winter"]
+    if req.season not in valid_seasons:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid season '{req.season}'. Must be one of {valid_seasons}"
+        )
+
+    loc_info = locations_dict[req.location]
+
+    # Construct input dataframe matching the trained pipeline
+    input_data = pd.DataFrame([{
+        'location': req.location,
+        'Season': req.season,
+        'elevation_m': loc_info['elevation_m'],
+        'latitude': loc_info['latitude'],
+        'longitude': loc_info['longitude'],
+        'precipitation_mm': float(req.today_rainfall_mm),
+        'Precip_Lag1': float(req.yesterday_rainfall_mm),
+        'Precip_Lag3': float(req.prior3_rainfall_mm),
+        'SM_Lag1': float(req.yesterday_soil_moisture)
+    }])
+
     try:
-        pred = model.predict(X)[0]
+        pred_sm = float(regressor.predict(input_data)[0])
+        # Bound soil moisture to realistic hydrological range
+        pred_sm = max(0.08, min(0.55, pred_sm))
+
+        # Flood probability from classifier
+        flood_prob = float(classifier.predict_proba(input_data)[0][1])
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Prediction error: {str(e)}")
-    
-    # Saturation status
-    saturation = "Saturated" if pred > 0.38 else "Normal"
-    
-    # Flood risk gauge
-    prob_flood = pred  # Since we're predicting soil moisture, use that as proxy for flood risk
-    if prob_flood < 0.2:
+        raise HTTPException(status_code=500, detail=f"Prediction calculation error: {str(e)}")
+
+    # Saturation threshold: > 0.38 m3/m3
+    is_saturated = bool(pred_sm > 0.38)
+    saturation_status = "Saturated (> 0.38 m³/m³)" if is_saturated else "Normal / Stable (< 0.38 m³/m³)"
+
+    # Flood risk category & advisory
+    if flood_prob < 0.25 and not is_saturated:
         flood_risk = "Low"
-    elif prob_flood < 0.5:
+        flood_alert_level = "Green"
+        advisory = "Normal hydrological conditions. Standard monitoring advised."
+    elif flood_prob < 0.50:
         flood_risk = "Moderate"
-    elif prob_flood < 0.8:
+        flood_alert_level = "Yellow"
+        advisory = "Catchment saturation building up. Keep river watch active in low-lying areas."
+    elif flood_prob < 0.75 or is_saturated:
         flood_risk = "High"
+        flood_alert_level = "Orange"
+        advisory = "High risk of flash floods and river overtopping. DHM field alert recommended."
     else:
         flood_risk = "Critical"
-    
-    # Model performance (dummy values since we didn't save metrics)
-    perf = {
-        'r2': 0.75,
-        'rmse': 0.05,
-        'auc': 0.85,
-        'accuracy': 0.80
-    }
-    
-    response = PredictionResponse(
+        flood_alert_level = "Red"
+        advisory = "Extreme flood hazard warning! Saturated soil combined with heavy precipitation. Immediate warning protocol active."
+
+    return PredictionResponse(
         location=req.location,
-        basin=basin,
-        river=river,
-        elevation_m=elevation_m,
-        latitude=latitude,
-        longitude=longitude,
-        predicted_soil_moisture=pred,
-        saturation_status=saturation,
+        basin=loc_info['basin'],
+        river=loc_info['river'],
+        dhm_station=loc_info['dhm_station'],
+        elevation_m=loc_info['elevation_m'],
+        latitude=loc_info['latitude'],
+        longitude=loc_info['longitude'],
+        predicted_soil_moisture=round(pred_sm, 4),
+        saturation_status=saturation_status,
+        is_saturated=is_saturated,
+        flood_probability=round(flood_prob * 100, 1),
         flood_risk=flood_risk,
-        model_performance=perf
+        flood_alert_level=flood_alert_level,
+        advisory=advisory,
+        model_performance=model_metrics
     )
-    return response
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app:app", host="127.0.0.1", port=port, reload=False)
+

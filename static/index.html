@@ -3,77 +3,270 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nepal Hydro Predictor</title>
+    <title>Nepal Hydro Predictor | Flood & Soil Moisture Forecasting</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <div class="container">
-        <h1>Nepal Hydro Predictor</h1>
-        <p>Select a location and enter weather parameters to get instant predictions.</p>
-
-        <div class="card">
-            <h2>Location</h2>
-            <select id="locationSelect">
-                <!-- Options will be populated by JS -->
-            </select>
-            <div id="locationDetails" class="location-details">
-                <p><strong>Basin:</strong> <span id="basin">-</span></p>
-                <p><strong>River:</strong> <span id="river">-</span></p>
-                <p><strong>DHM Station:</strong> <span id="dhmStation">-</span></p>
-                <p><strong>Elevation:</strong> <span id="elevation">-</span></p>
-                <p><strong>Latitude:</strong> <span id="lat">-</span></p>
-                <p><strong>Longitude:</strong> <span id="lon">-</span></p>
-                <p><strong>Avg Soil Moisture:</strong> <span id="avgSoil">-</span></p>
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="brand-icon">🌊</div>
+                <div>
+                    <h1 class="brand-title">Nepal Hydro Predictor</h1>
+                    <p class="brand-subtitle">AI-Powered Catchment Soil Moisture & Flood Risk Early Warning</p>
+                </div>
+            </div>
+            <div class="header-badges">
+                <span class="badge badge-online">
+                    <span class="status-dot"></span> ML Models Live
+                </span>
+                <span class="badge badge-meta" id="headerDatasetRecords">
+                    13,360 Records
+                </span>
             </div>
         </div>
+    </header>
 
-        <div class="card">
-            <h2>Season</h2>
-            <select id="seasonSelect">
-                <option value="Pre-Monsoon">Pre-Monsoon</option>
-                <option value="Monsoon">Monsoon</option>
-                <option value="Post-Monsoon">Post-Monsoon</option>
-                <option value="Winter">Winter</option>
-            </select>
-        </div>
+    <main class="main-layout">
+        <!-- Preset Scenarios Ribbon -->
+        <section class="preset-ribbon">
+            <span class="preset-label">⚡ Quick Presets:</span>
+            <button type="button" class="preset-btn" onclick="applyPreset('monsoon_heavy')">🌧️ Severe Monsoon</button>
+            <button type="button" class="preset-btn" onclick="applyPreset('moderate_rain')">🌦️ Moderate Rainfall</button>
+            <button type="button" class="preset-btn" onclick="applyPreset('dry_winter')">☀️ Dry Winter Season</button>
+            <button type="button" class="preset-btn" onclick="applyPreset('saturation_flood')">⚠️ Flash Flood Risk</button>
+        </section>
 
-        <div class="card">
-            <h2>Today's Rainfall (mm)</h2>
-            <input type="number" id="todayRain" min="0" max="250" step="1" value="0">
-        </div>
+        <div class="dashboard-grid">
+            <!-- Left Column: Input Parameters -->
+            <section class="card input-card">
+                <div class="card-header">
+                    <h2>⚙️ Station & Environmental Inputs</h2>
+                    <span class="tooltip-text">Configure hydrological observations</span>
+                </div>
 
-        <div class="card">
-            <h2>Yesterday's Rainfall (mm)</h2>
-            <input type="number" id="yesterdayRain" min="0" max="250" step="1" value="0">
-        </div>
+                <!-- Station Selection -->
+                <div class="form-group">
+                    <label for="locationSelect" class="form-label">Hydrological Station / Catchment</label>
+                    <select id="locationSelect" class="form-select">
+                        <option value="">Loading monitoring stations...</option>
+                    </select>
+                </div>
 
-        <div class="card">
-            <h2>3-Day Prior Rainfall (mm)</h2>
-            <input type="number" id="prior3Rain" min="0" max="250" step="1" value="0">
-        </div>
+                <!-- Station Metadata Chip Grid -->
+                <div id="stationDetails" class="station-meta-grid">
+                    <div class="meta-item">
+                        <span class="meta-label">River Basin</span>
+                        <span class="meta-val" id="basin">-</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Monitored River</span>
+                        <span class="meta-val" id="river">-</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">DHM Station ID</span>
+                        <span class="meta-val" id="dhmStation">-</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Elevation</span>
+                        <span class="meta-val" id="elevation">-</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Latitude / Longitude</span>
+                        <span class="meta-val mono" id="coordinates">-</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="meta-label">Historical Avg Moisture</span>
+                        <span class="meta-val highlight" id="avgSoil">-</span>
+                    </div>
+                </div>
 
-        <div class="card">
-            <h2>Yesterday's Soil Moisture (m³/m³)</h2>
-            <input type="number" id="soilMoisture" min="0.10" max="0.55" step="0.01" value="0.30">
-            <button id="useHistoricalBtn">Use Station Historical Average</button>
-        </div>
+                <!-- Season Selection -->
+                <div class="form-group">
+                    <label for="seasonSelect" class="form-label">Seasonal Regime</label>
+                    <select id="seasonSelect" class="form-select">
+                        <option value="Monsoon" selected>Monsoon (Jun - Sep)</option>
+                        <option value="Pre-Monsoon">Pre-Monsoon (Mar - May)</option>
+                        <option value="Post-Monsoon">Post-Monsoon (Oct - Nov)</option>
+                        <option value="Winter">Winter (Dec - Feb)</option>
+                    </select>
+                </div>
 
-        <div class="card">
-            <h2>Prediction</h2>
-            <button id="predictBtn">Get Prediction</button>
-            <div class="prediction-panel">
-                <p><strong>Predicted Soil Moisture (0-100 cm):</strong> <span id="soilMoistureResult">--</span></p>
-                <p><strong>Saturation Status:</strong> <span id="saturationStatus">--</span></p>
-                <p><strong>Flood Risk:</strong> <span id="floodRisk">--</span></p>
-            </div>
-        </div>
+                <!-- Rainfall Sliders & Number Inputs -->
+                <div class="slider-card">
+                    <div class="slider-header">
+                        <label for="todayRain" class="form-label">Today's Precipitation</label>
+                        <span class="val-badge"><span id="todayRainVal">65</span> mm</span>
+                    </div>
+                    <input type="range" id="todayRain" min="0" max="250" step="1" value="65" class="slider-control">
+                </div>
 
-        <div class="card">
-            <h2>Model Performance</h2>
-            <pre id="modelPerformance">Loading...</pre>
+                <div class="slider-card">
+                    <div class="slider-header">
+                        <label for="yesterdayRain" class="form-label">Yesterday's Precipitation (Lag 1)</label>
+                        <span class="val-badge"><span id="yesterdayRainVal">20</span> mm</span>
+                    </div>
+                    <input type="range" id="yesterdayRain" min="0" max="250" step="1" value="20" class="slider-control">
+                </div>
+
+                <div class="slider-card">
+                    <div class="slider-header">
+                        <label for="prior3Rain" class="form-label">3-Day Prior Precipitation (Lag 3)</label>
+                        <span class="val-badge"><span id="prior3RainVal">40</span> mm</span>
+                    </div>
+                    <input type="range" id="prior3Rain" min="0" max="250" step="1" value="40" class="slider-control">
+                </div>
+
+                <div class="slider-card highlight-slider">
+                    <div class="slider-header">
+                        <label for="soilMoisture" class="form-label">Yesterday's Soil Moisture (0-100 cm)</label>
+                        <span class="val-badge"><span id="soilMoistureVal">0.35</span> m³/m³</span>
+                    </div>
+                    <input type="range" id="soilMoisture" min="0.10" max="0.55" step="0.005" value="0.35" class="slider-control">
+                    <div class="slider-actions">
+                        <button type="button" id="useHistoricalBtn" class="btn-subtle">
+                            ↺ Use Station Historical Baseline
+                        </button>
+                    </div>
+                </div>
+
+                <button type="button" id="predictBtn" class="btn-primary">
+                    ⚡ Generate Real-Time Forecast
+                </button>
+            </section>
+
+            <!-- Right Column: Results & Interactive Visualizations -->
+            <section class="results-column">
+                <!-- Forecast Summary Hero Card -->
+                <div class="card result-hero-card" id="resultCard">
+                    <div class="result-header">
+                        <div>
+                            <span class="result-station-tag" id="resultStationTag">Rasuwagadhi Station</span>
+                            <h2 class="result-main-title">Hydrological Risk Assessment</h2>
+                        </div>
+                        <div id="riskLevelBadge" class="risk-badge risk-high">
+                            <span class="risk-indicator"></span>
+                            <span id="floodRiskText">HIGH RISK</span>
+                        </div>
+                    </div>
+
+                    <!-- Primary Indicator Metric Blocks -->
+                    <div class="metrics-row">
+                        <div class="metric-box">
+                            <span class="metric-title">Predicted Soil Moisture</span>
+                            <div class="metric-number-group">
+                                <span class="metric-number" id="predMoistureVal">--</span>
+                                <span class="metric-unit">m³/m³</span>
+                            </div>
+                            <span class="metric-tag" id="saturationStatusTag">Calculating...</span>
+                        </div>
+
+                        <div class="metric-box">
+                            <span class="metric-title">Flood Probability</span>
+                            <div class="metric-number-group">
+                                <span class="metric-number" id="floodProbVal">--</span>
+                                <span class="metric-unit">%</span>
+                            </div>
+                            <div class="prob-progress-bar">
+                                <div id="probBarFill" class="prob-bar-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="metric-box">
+                            <span class="metric-title">Hydrological State</span>
+                            <span class="state-callout" id="hydroStateCallout">Evaluating</span>
+                            <span class="metric-sub" id="hydroSubText">Monitoring depth: 0-100 cm</span>
+                        </div>
+                    </div>
+
+                    <!-- Moisture Saturation Progress Gauge -->
+                    <div class="saturation-gauge-container">
+                        <div class="gauge-label-row">
+                            <span>Catchment Soil Saturation (Threshold: 0.38 m³/m³)</span>
+                            <span id="saturationRatioText">0% of Threshold</span>
+                        </div>
+                        <div class="gauge-track">
+                            <div class="threshold-marker" style="left: 69%;" title="Saturation Cutoff (0.38 m3/m3)">
+                                <span class="marker-flag">0.38</span>
+                            </div>
+                            <div id="gaugeFill" class="gauge-fill" style="width: 50%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Safety Advisory Banner -->
+                    <div class="advisory-banner" id="advisoryBox">
+                        <div class="advisory-icon" id="advisoryIcon">📢</div>
+                        <div class="advisory-content">
+                            <h4 id="advisoryTitle">Hydrological Warning & Safety Advisory</h4>
+                            <p id="advisoryText">Select a station or adjust inputs to generate real-time advisory guidance.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Card -->
+                <div class="card charts-card">
+                    <div class="card-header">
+                        <h2>📊 Catchment Analytics & Visual Profiles</h2>
+                    </div>
+                    <div class="charts-grid">
+                        <div class="chart-wrapper">
+                            <h3>Precipitation Inflow (mm)</h3>
+                            <div class="canvas-container">
+                                <canvas id="rainChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <h3>Soil Moisture Comparison (m³/m³)</h3>
+                            <div class="canvas-container">
+                                <canvas id="moistureChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Model Performance Banner -->
+                <div class="card model-meta-card">
+                    <div class="card-header">
+                        <h2>🧠 Machine Learning Model Performance</h2>
+                        <span class="model-badge">Random Forest Ensemble Pipeline</span>
+                    </div>
+                    <div class="perf-metrics-grid">
+                        <div class="perf-item">
+                            <span class="perf-label">Regression R²</span>
+                            <span class="perf-value" id="metaR2">0.9954</span>
+                            <span class="perf-sub">Soil Moisture Fit</span>
+                        </div>
+                        <div class="perf-item">
+                            <span class="perf-label">Reg. RMSE</span>
+                            <span class="perf-value" id="metaRmse">0.0059</span>
+                            <span class="perf-sub">Mean Squared Error</span>
+                        </div>
+                        <div class="perf-item">
+                            <span class="perf-label">Classification AUC</span>
+                            <span class="perf-value" id="metaAuc">0.9972</span>
+                            <span class="perf-sub">ROC Area</span>
+                        </div>
+                        <div class="perf-item">
+                            <span class="perf-label">Classifier Accuracy</span>
+                            <span class="perf-value" id="metaAcc">98.5%</span>
+                            <span class="perf-sub">Flood Flag Detection</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </div>
-    </div>
+    </main>
+
+    <footer class="app-footer">
+        <p>Nepal Hydrological & Flood Risk Prediction System &bull; Powered by FastAPI & scikit-learn &bull; DHM Monitoring Stations</p>
+    </footer>
 
     <script src="/static/app.js"></script>
 </body>
