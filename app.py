@@ -2,6 +2,8 @@ import joblib
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any
 
@@ -27,6 +29,12 @@ location_lookup = {
 }
 
 app = FastAPI(title="Nepal Hydro Predictor")
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+async def root():
+    return FileResponse("static/index.html")
 
 class PredictRequest(BaseModel):
     location: str
