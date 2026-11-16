@@ -136,10 +136,10 @@ document.getElementById('useHistoricalBtn').addEventListener('click', () => {
 async function callPredictAPI() {
     const location = document.getElementById('locationSelect').value;
     const season = document.getElementById('seasonSelect').value;
-    const todayRain = parseFloat(document.getElementById('todayRain').value);
-    const yesterdayRain = parseFloat(document.getElementById('yesterdayRain').value);
-    const prior3Rain = parseFloat(document.getElementById('prior3Rain').value);
-    const soilMoisture = parseFloat(document.getElementById('soilMoisture').value);
+    const todayRain = parseFloat(document.getElementById('todayRain').value) || 0;
+    const yesterdayRain = parseFloat(document.getElementById('yesterdayRain').value) || 0;
+    const prior3Rain = parseFloat(document.getElementById('prior3Rain').value) || 0;
+    const soilMoisture = parseFloat(document.getElementById('soilMoisture').value) || 0.30;
 
     if (!location) {
         alert('Please select a location');
