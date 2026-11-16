@@ -88,10 +88,11 @@ def predict(req: PredictRequest):
     
     # Prepare feature vector (one-hot encoded location + numeric features)
     # For simplicity, we'll create a DataFrame with the same columns used in training
-    location_dummies = pd.get_dummies(pd.DataFrame([req.location]), columns=['location'], drop_first=False)
-    numeric_features = pd.DataFrame([[req.today_rainfall_mm, req.yesterday_rainfall_mm, req.prior3_rainfall_mm, req.yesterday_soil_moisture]],
-                                   columns=['precipitation_mm', 'yesterday_rainfall_mm', 'prior3_rainfall_mm', 'yesterday_soil_moisture'])
-    X = pd.concat([location_dummies, numeric_features], axis=1)
+    sorted_locations = sorted(location_lookup.keys())
+    row = {loc: int(loc == req.location) for loc in sorted_locations}
+    row['precipitation_mm'] = req.today_rainfall_mm
+    row['soil_moisture_0_100cm_m3m3'] = req.yesterday_soil_moisture
+    X = pd.DataFrame([row], columns=sorted_locations + ['precipitation_mm', 'soil_moisture_0_100cm_m3m3'])
     
     # Ensure the feature order matches training
     # This is a simplified approach; in practice, you'd need to ensure exact column alignment
